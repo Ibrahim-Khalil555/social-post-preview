@@ -1,0 +1,1193 @@
+diff --git a/api/og/[id].js b/api/og/[id].js
+index 126fb33..dcde54c 100644
+--- a/api/og/[id].js
++++ b/api/og/[id].js
+@@ -1,90 +1,86 @@
+ // api/og/[id].js
++//
++// Generates a branded 1200x630 PNG on the fly for posts that don't have a
++// real photo. Used as a fallback og:image by api/post/[id].js — most posts
++// already have a real image, so this is only hit when post.image is empty.
+ import { ImageResponse } from "@vercel/og";
++import { getPostById } from "../../src/data/posts.js";
+ 
+ export const config = {
+   runtime: "edge",
+ };
+ 
+-const POSTS = [
+-  {
+-    id: "1",
+-    title: "The Future of Web Development",
+-    description: "Exploring modern frameworks...",
+-    image:
+-      "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=600&h=400&fit=crop&crop=center",
+-  },
+-  // ... other posts
+-];
+-
+ export default async function handler(req) {
+   const { searchParams } = new URL(req.url);
+   const id = searchParams.get("id");
+ 
+-  const post = POSTS.find((p) => p.id === id);
++  const post = getPostById(id);
+ 
+   if (!post) {
+     return new Response("Post not found", { status: 404 });
+   }
+ 
+   return new ImageResponse(
+-    <div
+-      style={{
+-        width: "100%",
+-        height: "100%",
+-        display: "flex",
+-        flexDirection: "column",
+-        alignItems: "center",
+-        justifyContent: "center",
+-        background: "linear-gradient(to bottom, #1a1a2e, #16213e)",
+-        padding: "40px",
+-      }}
+-    >
++    (
+       <div
+         style={{
++          width: "100%",
++          height: "100%",
+           display: "flex",
+           flexDirection: "column",
+           alignItems: "center",
+           justifyContent: "center",
+-          background: "rgba(255,255,255,0.1)",
+-          borderRadius: "20px",
++          background: "linear-gradient(to bottom, #1a1a2e, #16213e)",
+           padding: "40px",
+-          maxWidth: "800px",
+         }}
+       >
+-        <h1
+-          style={{
+-            fontSize: "60px",
+-            color: "white",
+-            textAlign: "center",
+-            marginBottom: "20px",
+-          }}
+-        >
+-          {post.title}
+-        </h1>
+-        <p
+-          style={{
+-            fontSize: "30px",
+-            color: "#a0aec0",
+-            textAlign: "center",
+-            maxWidth: "600px",
+-          }}
+-        >
+-          {post.description}
+-        </p>
+         <div
+           style={{
+-            marginTop: "30px",
+-            padding: "10px 30px",
+-            background: "#4299e1",
+-            borderRadius: "50px",
+-            color: "white",
+-            fontSize: "24px",
++            display: "flex",
++            flexDirection: "column",
++            alignItems: "center",
++            justifyContent: "center",
++            background: "rgba(255,255,255,0.1)",
++            borderRadius: "20px",
++            padding: "40px",
++            maxWidth: "800px",
+           }}
+         >
+-          Read More →
++          <h1
++            style={{
++              fontSize: "60px",
++              color: "white",
++              textAlign: "center",
++              marginBottom: "20px",
++            }}
++          >
++            {post.title}
++          </h1>
++          <p
++            style={{
++              fontSize: "30px",
++              color: "#a0aec0",
++              textAlign: "center",
++              maxWidth: "600px",
++            }}
++          >
++            {post.excerpt || post.description}
++          </p>
++          <div
++            style={{
++              marginTop: "30px",
++              padding: "10px 30px",
++              background: "#4299e1",
++              borderRadius: "50px",
++              color: "white",
++              fontSize: "24px",
++            }}
++          >
++            Read More →
++          </div>
+         </div>
+       </div>
+-    </div>,
++    ),
+     {
+       width: 1200,
+       height: 630,
+diff --git a/api/post/[id].js b/api/post/[id].js
+index 2a180f0..186067d 100644
+--- a/api/post/[id].js
++++ b/api/post/[id].js
+@@ -1,53 +1,91 @@
+ // api/post/[id].js
++//
++// Runs at the edge for every /post/:id request. Social media crawlers
++// (Facebook, Twitter/X, LinkedIn, WhatsApp, Discord, etc.) do NOT execute
++// JavaScript — they only read the raw HTML response. That means Open Graph
++// tags set client-side by React (see MetaTags.jsx) are invisible to them.
++// This function returns real, server-rendered HTML with the correct
++// per-post <meta> tags baked in, which is what makes the image preview show
++// up when a link is shared.
++import { getPostById } from "../../src/data/posts.js";
++
+ export const config = {
+   runtime: "edge",
+ };
+ 
+-const POSTS = [
+-  {
+-    id: "1",
+-    title: "The Future of Web Development",
+-    description:
+-      "Exploring modern frameworks, edge functions, and the evolving landscape of frontend architecture.",
+-    image:
+-      "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=600&h=400&fit=crop&crop=center",
+-  },
+-  // ... other posts
+-];
++// Prevent broken/unsafe HTML if a title or description ever contains
++// characters like & < > " '
++function escapeHtml(str = "") {
++  return String(str)
++    .replace(/&/g, "&amp;")
++    .replace(/</g, "&lt;")
++    .replace(/>/g, "&gt;")
++    .replace(/"/g, "&quot;")
++    .replace(/'/g, "&#39;");
++}
+ 
+ export default async function handler(request) {
+   const url = new URL(request.url);
+   const pathParts = url.pathname.split("/");
+   const postId = pathParts[pathParts.length - 1];
+ 
+-  const post = POSTS.find((p) => p.id === postId);
++  const post = getPostById(postId);
++
++  // Fetch the real, already-built index.html for this deployment instead of
++  // hardcoding a script path. In production Vite outputs hashed filenames
++  // like /assets/index-Cx7f2A9d.js, so hardcoding "/src/main.jsx" (which
++  // only exists in `vite dev`) would leave the page blank once deployed.
++  const indexRes = await fetch(new URL("/index.html", url.origin));
++  let html = await indexRes.text();
+ 
+   if (!post) {
+-    return new Response("Post not found", { status: 404 });
++    return new Response(html, {
++      status: 404,
++      headers: { "Content-Type": "text/html; charset=utf-8" },
++    });
+   }
+ 
+-  const html = `
+-<!DOCTYPE html>
+-<html>
+-<head>
+-  <title>${post.title}</title>
+-  <meta property="og:title" content="${post.title}" />
+-  <meta property="og:description" content="${post.description}" />
+-  <meta property="og:image" content="${post.image}" />
+-  <meta property="og:url" content="${url.origin}/post/${post.id}" />
+-  <meta name="twitter:card" content="summary_large_image" />
+-</head>
+-<body>
+-  <div id="root"></div>
+-  <script type="module" src="/src/main.jsx"></script>
+-</body>
+-</html>
+-  `;
++  const title = escapeHtml(post.title);
++  const description = escapeHtml(post.description);
++  const image = post.image || `${url.origin}/api/og/${post.id}?id=${post.id}`;
++  const pageUrl = `${url.origin}/post/${post.id}`;
++
++  const metaTags = `
++    <title>${title}</title>
++    <meta name="description" content="${description}" />
++    <meta property="og:type" content="article" />
++    <meta property="og:site_name" content="My Blog" />
++    <meta property="og:title" content="${title}" />
++    <meta property="og:description" content="${description}" />
++    <meta property="og:image" content="${image}" />
++    <meta property="og:image:secure_url" content="${image}" />
++    <meta property="og:image:width" content="600" />
++    <meta property="og:image:height" content="400" />
++    <meta property="og:image:alt" content="${title}" />
++    <meta property="og:url" content="${pageUrl}" />
++    <meta name="twitter:card" content="summary_large_image" />
++    <meta name="twitter:title" content="${title}" />
++    <meta name="twitter:description" content="${description}" />
++    <meta name="twitter:image" content="${image}" />
++    <link rel="canonical" href="${pageUrl}" />`;
++
++  // Strip the generic fallback tags already baked into index.html, then
++  // inject the post-specific ones right before </head>.
++  html = html
++    .replace(/<title>.*?<\/title>/i, "")
++    .replace(/<meta\s+name="description"[^>]*>/i, "")
++    .replace(/<meta\s+property="og:[^"]*"[^>]*>\s*/gi, "")
++    .replace(/<meta\s+name="twitter:[^"]*"[^>]*>\s*/gi, "")
++    .replace(/<link\s+rel="canonical"[^>]*>\s*/i, "")
++    .replace("</head>", `${metaTags}\n  </head>`);
+ 
+   return new Response(html, {
+     headers: {
+-      "Content-Type": "text/html",
+-      "Cache-Control": "public, max-age=0, must-revalidate",
++      "Content-Type": "text/html; charset=utf-8",
++      // Cache at the edge for 5 min, allow serving stale for a day while
++      // revalidating in the background — keeps crawler responses fast.
++      "Cache-Control":
++        "public, max-age=0, s-maxage=300, stale-while-revalidate=86400",
+     },
+   });
+ }
+diff --git a/package-lock.json b/package-lock.json
+index e1ad51c..80edef8 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -8,8 +8,7 @@
+       "name": "social-post-preview",
+       "version": "0.0.0",
+       "dependencies": {
+-        "@vercel/edge": "^1.3.3",
+-        "@vercel/og": "^1.0.1",
++        "@vercel/og": "^0.6.3",
+         "react": "^18.2.0",
+         "react-dom": "^18.2.0"
+       },
+@@ -300,16 +299,6 @@
+         "node": ">=6.9.0"
+       }
+     },
+-    "node_modules/@emnapi/runtime": {
+-      "version": "1.11.3",
+-      "resolved": "https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.3.tgz",
+-      "integrity": "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==",
+-      "license": "MIT",
+-      "optional": true,
+-      "dependencies": {
+-        "tslib": "^2.4.0"
+-      }
+-    },
+     "node_modules/@esbuild/aix-ppc64": {
+       "version": "0.21.5",
+       "resolved": "https://registry.npmjs.org/@esbuild/aix-ppc64/-/aix-ppc64-0.21.5.tgz",
+@@ -701,507 +690,6 @@
+         "node": ">=12"
+       }
+     },
+-    "node_modules/@img/colour": {
+-      "version": "1.1.0",
+-      "resolved": "https://registry.npmjs.org/@img/colour/-/colour-1.1.0.tgz",
+-      "integrity": "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==",
+-      "license": "MIT",
+-      "optional": true,
+-      "engines": {
+-        "node": ">=18"
+-      }
+-    },
+-    "node_modules/@img/sharp-darwin-arm64": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-arm64/-/sharp-darwin-arm64-0.35.3.tgz",
+-      "integrity": "sha512-RMnFX7YQsMoh7lWfcM4NEHHymBX/rLuKNPVM84XE9ONPcaSCDgE7CHIHpSgPcO2xcRthgBy1HfNO319mwhIAkg==",
+-      "cpu": [
+-        "arm64"
+-      ],
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "os": [
+-        "darwin"
+-      ],
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      },
+-      "optionalDependencies": {
+-        "@img/sharp-libvips-darwin-arm64": "1.3.2"
+-      }
+-    },
+-    "node_modules/@img/sharp-darwin-x64": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-x64/-/sharp-darwin-x64-0.35.3.tgz",
+-      "integrity": "sha512-Xo+5uFBtLN0BKqieTxiFzFPQAUlBbbH5iBKyRX/z1JrbnYsHTfKJnUfL8+p2TPXr1pXqao4eeL4Rl144uDpK9w==",
+-      "cpu": [
+-        "x64"
+-      ],
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "os": [
+-        "darwin"
+-      ],
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      },
+-      "optionalDependencies": {
+-        "@img/sharp-libvips-darwin-x64": "1.3.2"
+-      }
+-    },
+-    "node_modules/@img/sharp-freebsd-wasm32": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-freebsd-wasm32/-/sharp-freebsd-wasm32-0.35.3.tgz",
+-      "integrity": "sha512-lUxcqWIj2wMQ9BrwNjngcr1gWUr5xgaGThBRqPPalIC2n67Cqj1uPh8NnA/ZhAg8hUbKl+kVHKwgUIwe6ZYPrg==",
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "os": [
+-        "freebsd"
+-      ],
+-      "dependencies": {
+-        "@img/sharp-wasm32": "0.35.3"
+-      },
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-libvips-darwin-arm64": {
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-arm64/-/sharp-libvips-darwin-arm64-1.3.2.tgz",
+-      "integrity": "sha512-9J6ypZFpQBj4YnePGoq/S38w6nz+vqg5WZLrLGY4YuSemdMq47GMLBPO42MzwdGwpg/agZ7xzZcFHa48xlywfg==",
+-      "cpu": [
+-        "arm64"
+-      ],
+-      "license": "LGPL-3.0-or-later",
+-      "optional": true,
+-      "os": [
+-        "darwin"
+-      ],
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-libvips-darwin-x64": {
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-x64/-/sharp-libvips-darwin-x64-1.3.2.tgz",
+-      "integrity": "sha512-m2pW1n6cns9VaubNwsZ+c3CRYjxNQWgJ5gPlnL1nbBcpkBvFm6SCFN5o0psFHI8w9n11NKhFkeEDns98tiqbEw==",
+-      "cpu": [
+-        "x64"
+-      ],
+-      "license": "LGPL-3.0-or-later",
+-      "optional": true,
+-      "os": [
+-        "darwin"
+-      ],
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-libvips-linux-arm": {
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm/-/sharp-libvips-linux-arm-1.3.2.tgz",
+-      "integrity": "sha512-1eMLzy92I4J6rmi4mAT8yC3HxOtniyGELlzGbNMLLeqe052ahFQ0h6LFq+lh5DsDIdYViIDst08abvSbcEdLXQ==",
+-      "cpu": [
+-        "arm"
+-      ],
+-      "license": "LGPL-3.0-or-later",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-libvips-linux-arm64": {
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm64/-/sharp-libvips-linux-arm64-1.3.2.tgz",
+-      "integrity": "sha512-dqVSFynCox4C/J8kT16V7SIFAns0IjgLwkvYT7p8LQVmJ5OS5b6tI9IGflxTeuBS//zXeFIUbwt5dwxyZ17cnA==",
+-      "cpu": [
+-        "arm64"
+-      ],
+-      "license": "LGPL-3.0-or-later",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-libvips-linux-ppc64": {
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-ppc64/-/sharp-libvips-linux-ppc64-1.3.2.tgz",
+-      "integrity": "sha512-3z0NHDxD6n5I9gc05U1eW1AyRm+Gznzq3naMrthPNqE6oYykcogW0l/jfpJdjYnuNl8R7yI9pNbE1XiUeyq0Aw==",
+-      "cpu": [
+-        "ppc64"
+-      ],
+-      "license": "LGPL-3.0-or-later",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-libvips-linux-riscv64": {
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-riscv64/-/sharp-libvips-linux-riscv64-1.3.2.tgz",
+-      "integrity": "sha512-bsb4rI+NldGOsXuej2r8OdSS8+zXDVaCWxyWrcv6kneTOlgAHtZABRzBBCwdsPiD90J4myNJuHpg6kA20ImW/w==",
+-      "cpu": [
+-        "riscv64"
+-      ],
+-      "license": "LGPL-3.0-or-later",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-libvips-linux-s390x": {
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-s390x/-/sharp-libvips-linux-s390x-1.3.2.tgz",
+-      "integrity": "sha512-/ABshyj8gCpyIrNXnHn4LorDJ0HHm1VhXPBlxZ8zAtfVPAaSafXPGn+sUSIRiwaSBy0mmFjSjiXI5mkcwdChKQ==",
+-      "cpu": [
+-        "s390x"
+-      ],
+-      "license": "LGPL-3.0-or-later",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-libvips-linux-x64": {
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-x64/-/sharp-libvips-linux-x64-1.3.2.tgz",
+-      "integrity": "sha512-ITPEtgffGJ0S6G9dRyw/366tJQqFRcHWPHhC+Stpg3Z8AEMrDrTr2lhdz4f/Y/HMbRh//7Z5mBzEpVdi62Oc3w==",
+-      "cpu": [
+-        "x64"
+-      ],
+-      "license": "LGPL-3.0-or-later",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-libvips-linuxmusl-arm64": {
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-arm64/-/sharp-libvips-linuxmusl-arm64-1.3.2.tgz",
+-      "integrity": "sha512-zE9EdiUzUmg5mDT5a1rk5fYJ6GWPloTwWBYDS14naqHsL+EaMpDj1AWnpLgh3u0YCORv2Tt50wrcrpYqkP97Kw==",
+-      "cpu": [
+-        "arm64"
+-      ],
+-      "license": "LGPL-3.0-or-later",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-libvips-linuxmusl-x64": {
+-      "version": "1.3.2",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-x64/-/sharp-libvips-linuxmusl-x64-1.3.2.tgz",
+-      "integrity": "sha512-m0lrLiUt+lBYnCFr8qV/65yMR4E/c7/wf78I5eKTdkEakFAlZ9QlzEM3QIhhAwVeUhLAHLcCq7a7Vszq/oFNZQ==",
+-      "cpu": [
+-        "x64"
+-      ],
+-      "license": "LGPL-3.0-or-later",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-linux-arm": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm/-/sharp-linux-arm-0.35.3.tgz",
+-      "integrity": "sha512-affVWCTLooy8TSxbDx2qkzuDeaWLNVBA+P//FNBirHsXpP2fuBhk5AuboYUnrDnzoXes8GFjpTx0SBFOCRg+FA==",
+-      "cpu": [
+-        "arm"
+-      ],
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      },
+-      "optionalDependencies": {
+-        "@img/sharp-libvips-linux-arm": "1.3.2"
+-      }
+-    },
+-    "node_modules/@img/sharp-linux-arm64": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm64/-/sharp-linux-arm64-0.35.3.tgz",
+-      "integrity": "sha512-QgKDspHPnrU+GQ55XPhGwyhC8acLVOOSyAvo1oVfFmrIXLkDNmGWzAfDZ4xK8oSA1qBQrALcHX0G5UZni/SuFQ==",
+-      "cpu": [
+-        "arm64"
+-      ],
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      },
+-      "optionalDependencies": {
+-        "@img/sharp-libvips-linux-arm64": "1.3.2"
+-      }
+-    },
+-    "node_modules/@img/sharp-linux-ppc64": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linux-ppc64/-/sharp-linux-ppc64-0.35.3.tgz",
+-      "integrity": "sha512-sMd8rDxmpLOwv/7N44klFjOD5DUO7FLdjiXDI0hoxYaf7Ar262dQIEkosE98bps+5HPLtp/EvNqeqQtOycP/IA==",
+-      "cpu": [
+-        "ppc64"
+-      ],
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      },
+-      "optionalDependencies": {
+-        "@img/sharp-libvips-linux-ppc64": "1.3.2"
+-      }
+-    },
+-    "node_modules/@img/sharp-linux-riscv64": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linux-riscv64/-/sharp-linux-riscv64-0.35.3.tgz",
+-      "integrity": "sha512-0Eob78yjlYPfL5vMNWAW55l3R9Y6BQS/gOfe0ZcP9mEz9ohhKSt4im1hayiknXgf8AWrFqMvJcKIdmLmEe7yeQ==",
+-      "cpu": [
+-        "riscv64"
+-      ],
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      },
+-      "optionalDependencies": {
+-        "@img/sharp-libvips-linux-riscv64": "1.3.2"
+-      }
+-    },
+-    "node_modules/@img/sharp-linux-s390x": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linux-s390x/-/sharp-linux-s390x-0.35.3.tgz",
+-      "integrity": "sha512-KgAxQ0DxpNOq1rG2t5cgTgShJFGSuU7XO45cqC+1NVOuZnP6tlgZRuSYOfNupGkHID0o3cJOsw4DVeJpMovcGw==",
+-      "cpu": [
+-        "s390x"
+-      ],
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      },
+-      "optionalDependencies": {
+-        "@img/sharp-libvips-linux-s390x": "1.3.2"
+-      }
+-    },
+-    "node_modules/@img/sharp-linux-x64": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linux-x64/-/sharp-linux-x64-0.35.3.tgz",
+-      "integrity": "sha512-8pqvxubL2PGdhlPy6GLqzDYMUjyRmKAwKHYKixpdJYBUK7PJ0C029XdsnpFIdgRZG68fZiGdHVWcKPvtiPB4cA==",
+-      "cpu": [
+-        "x64"
+-      ],
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      },
+-      "optionalDependencies": {
+-        "@img/sharp-libvips-linux-x64": "1.3.2"
+-      }
+-    },
+-    "node_modules/@img/sharp-linuxmusl-arm64": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-arm64/-/sharp-linuxmusl-arm64-0.35.3.tgz",
+-      "integrity": "sha512-Vz0iQjzzcSX3HCbfwFfCSG/9SCIqyO0mH2sXyiHaAYfBk0cRsCWXRyQYX0ovCK/PAQBbTzQ0dsPQHh5MAFL59w==",
+-      "cpu": [
+-        "arm64"
+-      ],
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      },
+-      "optionalDependencies": {
+-        "@img/sharp-libvips-linuxmusl-arm64": "1.3.2"
+-      }
+-    },
+-    "node_modules/@img/sharp-linuxmusl-x64": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-x64/-/sharp-linuxmusl-x64-0.35.3.tgz",
+-      "integrity": "sha512-6O1NPKcDVj9QEdg7Hx549EX8U0rp6yXQERqru6yRN7fGBn32UvIRJUlWnk+8xDCiG76hXVBbX82NZ/ZKr0euIg==",
+-      "cpu": [
+-        "x64"
+-      ],
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "os": [
+-        "linux"
+-      ],
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      },
+-      "optionalDependencies": {
+-        "@img/sharp-libvips-linuxmusl-x64": "1.3.2"
+-      }
+-    },
+-    "node_modules/@img/sharp-wasm32": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.3.tgz",
+-      "integrity": "sha512-cZ0XkcYGpHZkqW6iCkqTcmUC0CD9DhD5d/qeZlZkfRBn6GnHniZXLUo5+9xw8Iv76YE6LQFN9YNBlKREcCG76w==",
+-      "license": "Apache-2.0 AND LGPL-3.0-or-later AND MIT",
+-      "optional": true,
+-      "dependencies": {
+-        "@emnapi/runtime": "^1.11.1"
+-      },
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-webcontainers-wasm32": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-webcontainers-wasm32/-/sharp-webcontainers-wasm32-0.35.3.tgz",
+-      "integrity": "sha512-2rnq7bX3NzeR2T4YWgz8qiG4h3TSdMe+vN1iQXpJleSJ3SM5zQ8Fy2SyyXAWlbxpEZ2Y+Z4u1BePgJEYbSy80Q==",
+-      "cpu": [
+-        "wasm32"
+-      ],
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "dependencies": {
+-        "@img/sharp-wasm32": "0.35.3"
+-      },
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-win32-arm64": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-win32-arm64/-/sharp-win32-arm64-0.35.3.tgz",
+-      "integrity": "sha512-4bPwFdMbeC4JQ8L8LOyWp6nsHcboP5fxkp6iPOXz2Vg49R42TuMs2whkJ5OAP4/Ul035qOzy0AecOF9VOscn4w==",
+-      "cpu": [
+-        "arm64"
+-      ],
+-      "license": "Apache-2.0 AND LGPL-3.0-or-later",
+-      "optional": true,
+-      "os": [
+-        "win32"
+-      ],
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-win32-ia32": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-win32-ia32/-/sharp-win32-ia32-0.35.3.tgz",
+-      "integrity": "sha512-r53mXsBN6lFUDiST764SvgwUdHAqM4rPAiDzAmf4fLoB6X/rkfyTrLCg6+g17wJJiCmB3JYgHuUldCWUIRFSXw==",
+-      "cpu": [
+-        "ia32"
+-      ],
+-      "license": "Apache-2.0 AND LGPL-3.0-or-later",
+-      "optional": true,
+-      "os": [
+-        "win32"
+-      ],
+-      "engines": {
+-        "node": "^20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+-    "node_modules/@img/sharp-win32-x64": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.35.3.tgz",
+-      "integrity": "sha512-D4y1vNeZrIIJCN+uHaWVtH86B+aCrdMYYjicy9pXHvbGZeGYLLSd3wdVuC37FxVXlU1ARsk84eKWfWMXGYEqvA==",
+-      "cpu": [
+-        "x64"
+-      ],
+-      "license": "Apache-2.0 AND LGPL-3.0-or-later",
+-      "optional": true,
+-      "os": [
+-        "win32"
+-      ],
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      }
+-    },
+     "node_modules/@jridgewell/gen-mapping": {
+       "version": "0.3.13",
+       "resolved": "https://registry.npmjs.org/@jridgewell/gen-mapping/-/gen-mapping-0.3.13.tgz",
+@@ -1270,9 +758,9 @@
+       }
+     },
+     "node_modules/@resvg/resvg-wasm": {
+-      "version": "2.4.1",
+-      "resolved": "https://registry.npmjs.org/@resvg/resvg-wasm/-/resvg-wasm-2.4.1.tgz",
+-      "integrity": "sha512-yi6R0HyHtsoWTRA06Col4WoDs7SvlXU3DLMNP2bdAgs7HK18dTEVl1weXgxRzi8gwLteGUbIg29zulxIB3GSdg==",
++      "version": "2.4.0",
++      "resolved": "https://registry.npmjs.org/@resvg/resvg-wasm/-/resvg-wasm-2.4.0.tgz",
++      "integrity": "sha512-C7c51Nn4yTxXFKvgh2txJFNweaVcfUPQxwEUFw4aWsCmfiBDJsTSwviIF8EcwjQ6k8bPyMWCl1vw4BdxE569Cg==",
+       "license": "MPL-2.0",
+       "engines": {
+         "node": ">= 10"
+@@ -1703,26 +1191,18 @@
+       "dev": true,
+       "license": "MIT"
+     },
+-    "node_modules/@vercel/edge": {
+-      "version": "1.3.3",
+-      "resolved": "https://registry.npmjs.org/@vercel/edge/-/edge-1.3.3.tgz",
+-      "integrity": "sha512-B4zu4g81nI1JHoOqc2FnXmh1DUpAJlZKPQsZck6iLp23kQ/zZF4ma6+Wejn8p9bKB6WPTbYPqEYrRXx4yl0qaw==",
+-      "license": "Apache-2.0"
+-    },
+     "node_modules/@vercel/og": {
+-      "version": "1.0.1",
+-      "resolved": "https://registry.npmjs.org/@vercel/og/-/og-1.0.1.tgz",
+-      "integrity": "sha512-uLTgu6ZIYuPuDnPpwkYhJsOjogqIhMnjjLREFpRAXjsMpCIQ2RmNX8Iz/5shDXfva1A2V0kC5j+KFVUSc4TVew==",
++      "version": "0.6.8",
++      "resolved": "https://registry.npmjs.org/@vercel/og/-/og-0.6.8.tgz",
++      "integrity": "sha512-e4kQK9mP8ntpo3dACWirGod/hHv4qO5JMj9a/0a2AZto7b4persj5YP7t1Er372gTtYFTYxNhMx34jRvHooglw==",
+       "license": "MPL-2.0",
+       "dependencies": {
+-        "@resvg/resvg-wasm": "2.4.1",
+-        "satori": "0.29.0"
++        "@resvg/resvg-wasm": "2.4.0",
++        "satori": "0.12.2",
++        "yoga-wasm-web": "0.3.3"
+       },
+       "engines": {
+-        "node": ">=22"
+-      },
+-      "optionalDependencies": {
+-        "sharp": "^0.35.3"
++        "node": ">=16"
+       }
+     },
+     "node_modules/@vitejs/plugin-react": {
+@@ -1867,9 +1347,9 @@
+       }
+     },
+     "node_modules/css-gradient-parser": {
+-      "version": "0.0.17",
+-      "resolved": "https://registry.npmjs.org/css-gradient-parser/-/css-gradient-parser-0.0.17.tgz",
+-      "integrity": "sha512-w2Xy9UMMwlKtou0vlRnXvWglPAceXCTtcmVSo8ZBUvqCV5aXEFP/PC6d+I464810I9FT++UACwTD5511bmGPUg==",
++      "version": "0.0.16",
++      "resolved": "https://registry.npmjs.org/css-gradient-parser/-/css-gradient-parser-0.0.16.tgz",
++      "integrity": "sha512-3O5QdqgFRUbXvK1x5INf1YkBz1UKSWqrd63vWsum8MNHDBYD5urm3QtxZbKU259OrEXNM26lP/MPY3d1IGkBgA==",
+       "license": "MIT",
+       "engines": {
+         "node": ">=16"
+@@ -1904,16 +1384,6 @@
+         }
+       }
+     },
+-    "node_modules/detect-libc": {
+-      "version": "2.1.2",
+-      "resolved": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz",
+-      "integrity": "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==",
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "engines": {
+-        "node": ">=8"
+-      }
+-    },
+     "node_modules/electron-to-chromium": {
+       "version": "1.5.407",
+       "resolved": "https://registry.npmjs.org/electron-to-chromium/-/electron-to-chromium-1.5.407.tgz",
+@@ -1921,14 +1391,11 @@
+       "dev": true,
+       "license": "ISC"
+     },
+-    "node_modules/emoji-regex-xs": {
+-      "version": "2.0.1",
+-      "resolved": "https://registry.npmjs.org/emoji-regex-xs/-/emoji-regex-xs-2.0.1.tgz",
+-      "integrity": "sha512-1QFuh8l7LqUcKe24LsPUNzjrzJQ7pgRwp1QMcZ5MX6mFplk2zQ08NVCM84++1cveaUUYtcCYHmeFEuNg16sU4g==",
+-      "license": "MIT",
+-      "engines": {
+-        "node": ">=10.0.0"
+-      }
++    "node_modules/emoji-regex": {
++      "version": "10.6.0",
++      "resolved": "https://registry.npmjs.org/emoji-regex/-/emoji-regex-10.6.0.tgz",
++      "integrity": "sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A==",
++      "license": "MIT"
+     },
+     "node_modules/esbuild": {
+       "version": "0.21.5",
+@@ -2268,22 +1735,22 @@
+       }
+     },
+     "node_modules/satori": {
+-      "version": "0.29.0",
+-      "resolved": "https://registry.npmjs.org/satori/-/satori-0.29.0.tgz",
+-      "integrity": "sha512-fPAfrwNaIQ7EsJLhY382STEqpczN6ZEH9NsKXDQgRcxUXNNPB73iAjSshzFwTaaScT68pxV0pmG6TBzDQ4sEGw==",
++      "version": "0.12.2",
++      "resolved": "https://registry.npmjs.org/satori/-/satori-0.12.2.tgz",
++      "integrity": "sha512-3C/laIeE6UUe9A+iQ0A48ywPVCCMKCNSTU5Os101Vhgsjd3AAxGNjyq0uAA8kulMPK5n0csn8JlxPN9riXEjLA==",
+       "license": "MPL-2.0",
+       "dependencies": {
+         "@shuding/opentype.js": "1.4.0-beta.0",
+         "css-background-parser": "^0.1.0",
+         "css-box-shadow": "1.0.0-3",
+-        "css-gradient-parser": "^0.0.17",
++        "css-gradient-parser": "^0.0.16",
+         "css-to-react-native": "^3.0.0",
+-        "emoji-regex-xs": "^2.0.1",
++        "emoji-regex": "^10.2.1",
+         "escape-html": "^1.0.3",
+         "linebreak": "^1.1.0",
+         "parse-css-color": "^0.2.1",
+         "postcss-value-parser": "^4.2.0",
+-        "yoga-layout": "^3.2.1"
++        "yoga-wasm-web": "^0.3.3"
+       },
+       "engines": {
+         "node": ">=16"
+@@ -2308,69 +1775,6 @@
+         "semver": "bin/semver.js"
+       }
+     },
+-    "node_modules/sharp": {
+-      "version": "0.35.3",
+-      "resolved": "https://registry.npmjs.org/sharp/-/sharp-0.35.3.tgz",
+-      "integrity": "sha512-ej0zVHuZGHCiABXcNxeYhpRnPNPAcvbG8RMdBAhDAxLKkCRVSpK3Iyu7qbqw3JMzoj0REeM6f3tJLtVwl0023Q==",
+-      "license": "Apache-2.0",
+-      "optional": true,
+-      "dependencies": {
+-        "@img/colour": "^1.1.0",
+-        "detect-libc": "^2.1.2",
+-        "semver": "^7.8.5"
+-      },
+-      "engines": {
+-        "node": ">=20.9.0"
+-      },
+-      "funding": {
+-        "url": "https://opencollective.com/libvips"
+-      },
+-      "optionalDependencies": {
+-        "@img/sharp-darwin-arm64": "0.35.3",
+-        "@img/sharp-darwin-x64": "0.35.3",
+-        "@img/sharp-freebsd-wasm32": "0.35.3",
+-        "@img/sharp-libvips-darwin-arm64": "1.3.2",
+-        "@img/sharp-libvips-darwin-x64": "1.3.2",
+-        "@img/sharp-libvips-linux-arm": "1.3.2",
+-        "@img/sharp-libvips-linux-arm64": "1.3.2",
+-        "@img/sharp-libvips-linux-ppc64": "1.3.2",
+-        "@img/sharp-libvips-linux-riscv64": "1.3.2",
+-        "@img/sharp-libvips-linux-s390x": "1.3.2",
+-        "@img/sharp-libvips-linux-x64": "1.3.2",
+-        "@img/sharp-libvips-linuxmusl-arm64": "1.3.2",
+-        "@img/sharp-libvips-linuxmusl-x64": "1.3.2",
+-        "@img/sharp-linux-arm": "0.35.3",
+-        "@img/sharp-linux-arm64": "0.35.3",
+-        "@img/sharp-linux-ppc64": "0.35.3",
+-        "@img/sharp-linux-riscv64": "0.35.3",
+-        "@img/sharp-linux-s390x": "0.35.3",
+-        "@img/sharp-linux-x64": "0.35.3",
+-        "@img/sharp-linuxmusl-arm64": "0.35.3",
+-        "@img/sharp-linuxmusl-x64": "0.35.3",
+-        "@img/sharp-webcontainers-wasm32": "0.35.3",
+-        "@img/sharp-win32-arm64": "0.35.3",
+-        "@img/sharp-win32-ia32": "0.35.3",
+-        "@img/sharp-win32-x64": "0.35.3"
+-      },
+-      "peerDependenciesMeta": {
+-        "@types/node": {
+-          "optional": true
+-        }
+-      }
+-    },
+-    "node_modules/sharp/node_modules/semver": {
+-      "version": "7.8.5",
+-      "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz",
+-      "integrity": "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==",
+-      "license": "ISC",
+-      "optional": true,
+-      "bin": {
+-        "semver": "bin/semver.js"
+-      },
+-      "engines": {
+-        "node": ">=10"
+-      }
+-    },
+     "node_modules/source-map-js": {
+       "version": "1.2.1",
+       "resolved": "https://registry.npmjs.org/source-map-js/-/source-map-js-1.2.1.tgz",
+@@ -2393,13 +1797,6 @@
+       "integrity": "sha512-pkY1fj1cKHb2seWDy0B16HeWyczlJA9/WW3u3c4z/NiWDsO3DOU5D7nhTLE9CF0yXv/QZFY7sEJmj24dK+Rrqw==",
+       "license": "MIT"
+     },
+-    "node_modules/tslib": {
+-      "version": "2.8.1",
+-      "resolved": "https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz",
+-      "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==",
+-      "license": "0BSD",
+-      "optional": true
+-    },
+     "node_modules/unicode-trie": {
+       "version": "2.0.0",
+       "resolved": "https://registry.npmjs.org/unicode-trie/-/unicode-trie-2.0.0.tgz",
+@@ -2508,10 +1905,10 @@
+       "dev": true,
+       "license": "ISC"
+     },
+-    "node_modules/yoga-layout": {
+-      "version": "3.2.1",
+-      "resolved": "https://registry.npmjs.org/yoga-layout/-/yoga-layout-3.2.1.tgz",
+-      "integrity": "sha512-0LPOt3AxKqMdFBZA3HBAt/t/8vIKq7VaQYbuA8WxCgung+p9TVyKRYdpvCb80HcdTN2NkbIKbhNwKUfm3tQywQ==",
++    "node_modules/yoga-wasm-web": {
++      "version": "0.3.3",
++      "resolved": "https://registry.npmjs.org/yoga-wasm-web/-/yoga-wasm-web-0.3.3.tgz",
++      "integrity": "sha512-N+d4UJSJbt/R3wqY7Coqs5pcV0aUj2j9IaQ3rNj9bVCLld8tTGKRa2USARjnvZJWVx1NDmQev8EknoczaOQDOA==",
+       "license": "MIT"
+     }
+   }
+diff --git a/package.json b/package.json
+index d016e06..fc434ea 100644
+--- a/package.json
++++ b/package.json
+@@ -11,7 +11,8 @@
+   },
+   "dependencies": {
+     "react": "^18.2.0",
+-    "react-dom": "^18.2.0"
++    "react-dom": "^18.2.0",
++    "@vercel/og": "^0.6.3"
+   },
+   "devDependencies": {
+     "@vitejs/plugin-react": "^4.2.1",
+diff --git a/src/App.jsx b/src/App.jsx
+index d587a69..8460e23 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
+ import { POSTS, getPostById } from "./data/posts";
+ import PostCard from "./components/PostCard";
+ import PostDetail from "./components/PostDetail";
++import MetaTags from "./components/MetaTags";
+ import "./index.css";
+ 
+ function App() {
+@@ -37,6 +38,17 @@ function App() {
+ 
+   return (
+     <div className="app">
++      {/* Updates the browser tab title/description while navigating inside
++          the SPA. This has no effect on social media previews — crawlers
++          don't run JS, so those are handled server-side by api/post/[id].js */}
++      {selectedPost && (
++        <MetaTags
++          title={selectedPost.title}
++          description={selectedPost.description}
++          image={selectedPost.image}
++          url={`${window.location.origin}/post/${selectedPost.id}`}
++        />
++      )}
+       <h1 className="app-title">📝 Blog Posts</h1>
+ 
+       <div className="card-grid">
+diff --git a/src/components/MetaTags.jsx b/src/components/MetaTags.jsx
+index 0c72b30..ad890e8 100644
+--- a/src/components/MetaTags.jsx
++++ b/src/components/MetaTags.jsx
+@@ -1,28 +1,58 @@
+-import React from "react";
++import { useEffect } from "react";
+ 
++// Client-side only helper: keeps the browser tab's title/description in sync
++// while the user navigates inside the SPA (e.g. opening a post modal).
++//
++// IMPORTANT: this does NOT affect social media link previews. Crawlers for
++// Facebook/Twitter/LinkedIn/WhatsApp etc. fetch the raw HTML and never run
++// this JavaScript, so they'd never see changes made here. The actual preview
++// image/title/description come from the server-rendered HTML returned by
++// api/post/[id].js. This component only improves the experience for a human
++// browsing the app in a tab.
+ const MetaTags = ({ title, description, image, url }) => {
+-  const metaTitle = title || "Default Title";
+-  const metaDescription = description || "Default description";
+-  const metaImage = image || "https://via.placeholder.com/600x400";
+-  const metaUrl = url || window.location.href;
++  useEffect(() => {
++    const metaTitle = title || "My Blog";
++    const metaDescription = description || "A blog about web development";
++    const metaImage = image || "";
++    const metaUrl = url || window.location.href;
+ 
+-  return (
+-    <>
+-      <title>{metaTitle}</title>
+-      <meta name="description" content={metaDescription} />
+-      <meta property="og:title" content={metaTitle} />
+-      <meta property="og:description" content={metaDescription} />
+-      <meta property="og:image" content={metaImage} />
+-      <meta property="og:url" content={metaUrl} />
+-      <meta property="og:type" content="article" />
+-      <meta property="og:site_name" content="My Blog" />
+-      <meta name="twitter:card" content="summary_large_image" />
+-      <meta name="twitter:title" content={metaTitle} />
+-      <meta name="twitter:description" content={metaDescription} />
+-      <meta name="twitter:image" content={metaImage} />
+-      <link rel="canonical" href={metaUrl} />
+-    </>
+-  );
++    const previousTitle = document.title;
++    document.title = metaTitle;
++
++    const setMeta = (selector, attr, value) => {
++      let el = document.head.querySelector(selector);
++      if (!el) {
++        el = document.createElement(selector.startsWith("link") ? "link" : "meta");
++        if (selector.includes('name="description"')) el.setAttribute("name", "description");
++        else if (selector.includes('property="')) {
++          el.setAttribute("property", selector.match(/property="([^"]+)"/)[1]);
++        } else if (selector.includes('name="')) {
++          el.setAttribute("name", selector.match(/name="([^"]+)"/)[1]);
++        } else if (selector.startsWith("link")) {
++          el.setAttribute("rel", "canonical");
++        }
++        document.head.appendChild(el);
++      }
++      el.setAttribute(attr, value);
++    };
++
++    setMeta('meta[name="description"]', "content", metaDescription);
++    setMeta('meta[property="og:title"]', "content", metaTitle);
++    setMeta('meta[property="og:description"]', "content", metaDescription);
++    setMeta('meta[property="og:image"]', "content", metaImage);
++    setMeta('meta[property="og:url"]', "content", metaUrl);
++    setMeta('meta[name="twitter:title"]', "content", metaTitle);
++    setMeta('meta[name="twitter:description"]', "content", metaDescription);
++    setMeta('meta[name="twitter:image"]', "content", metaImage);
++    setMeta('link[rel="canonical"]', "href", metaUrl);
++
++    // Restore the default tab title when this view unmounts (e.g. modal closed)
++    return () => {
++      document.title = previousTitle;
++    };
++  }, [title, description, image, url]);
++
++  return null;
+ };
+ 
+ export default MetaTags;
+diff --git a/vercel.json b/vercel.json
+index b69827f..ff7ee95 100644
+--- a/vercel.json
++++ b/vercel.json
+@@ -1,18 +1,7 @@
+ {
+   "version": 2,
+-  "functions": {
+-    "api/post/[id].js": {
+-      "runtime": "edge"
+-    }
+-  },
+-  "routes": [
+-    {
+-      "src": "/post/(.*)",
+-      "dest": "/api/post/$1"
+-    },
+-    {
+-      "src": "/(.*)",
+-      "dest": "/index.html"
+-    }
++  "rewrites": [
++    { "source": "/post/:id", "destination": "/api/post/:id" },
++    { "source": "/(.*)", "destination": "/index.html" }
+   ]
+ }

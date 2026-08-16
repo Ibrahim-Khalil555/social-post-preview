@@ -1,18 +1,7 @@
 {
   "version": 2,
-  "functions": {
-    "api/post/[id].js": {
-      "runtime": "edge"
-    }
-  },
-  "routes": [
-    {
-      "src": "/post/(.*)",
-      "dest": "/api/post/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    }
+  "rewrites": [
+    { "source": "/post/:id", "destination": "/api/post/:id" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
