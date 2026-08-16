@@ -22,8 +22,11 @@ const MetaTags = ({ title, description, image, url }) => {
     const setMeta = (selector, attr, value) => {
       let el = document.head.querySelector(selector);
       if (!el) {
-        el = document.createElement(selector.startsWith("link") ? "link" : "meta");
-        if (selector.includes('name="description"')) el.setAttribute("name", "description");
+        el = document.createElement(
+          selector.startsWith("link") ? "link" : "meta",
+        );
+        if (selector.includes('name="description"'))
+          el.setAttribute("name", "description");
         else if (selector.includes('property="')) {
           el.setAttribute("property", selector.match(/property="([^"]+)"/)[1]);
         } else if (selector.includes('name="')) {

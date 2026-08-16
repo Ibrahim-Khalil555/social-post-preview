@@ -21,66 +21,64 @@ export default async function handler(req) {
   }
 
   return new ImageResponse(
-    (
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "linear-gradient(to bottom, #1a1a2e, #16213e)",
+        padding: "40px",
+      }}
+    >
       <div
         style={{
-          width: "100%",
-          height: "100%",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          background: "linear-gradient(to bottom, #1a1a2e, #16213e)",
+          background: "rgba(255,255,255,0.1)",
+          borderRadius: "20px",
           padding: "40px",
+          maxWidth: "800px",
         }}
       >
-        <div
+        <h1
           style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "rgba(255,255,255,0.1)",
-            borderRadius: "20px",
-            padding: "40px",
-            maxWidth: "800px",
+            fontSize: "60px",
+            color: "white",
+            textAlign: "center",
+            marginBottom: "20px",
           }}
         >
-          <h1
-            style={{
-              fontSize: "60px",
-              color: "white",
-              textAlign: "center",
-              marginBottom: "20px",
-            }}
-          >
-            {post.title}
-          </h1>
-          <p
-            style={{
-              fontSize: "30px",
-              color: "#a0aec0",
-              textAlign: "center",
-              maxWidth: "600px",
-            }}
-          >
-            {post.excerpt || post.description}
-          </p>
-          <div
-            style={{
-              marginTop: "30px",
-              padding: "10px 30px",
-              background: "#4299e1",
-              borderRadius: "50px",
-              color: "white",
-              fontSize: "24px",
-            }}
-          >
-            Read More →
-          </div>
+          {post.title}
+        </h1>
+        <p
+          style={{
+            fontSize: "30px",
+            color: "#a0aec0",
+            textAlign: "center",
+            maxWidth: "600px",
+          }}
+        >
+          {post.excerpt || post.description}
+        </p>
+        <div
+          style={{
+            marginTop: "30px",
+            padding: "10px 30px",
+            background: "#4299e1",
+            borderRadius: "50px",
+            color: "white",
+            fontSize: "24px",
+          }}
+        >
+          Read More →
         </div>
       </div>
-    ),
+    </div>,
     {
       width: 1200,
       height: 630,
