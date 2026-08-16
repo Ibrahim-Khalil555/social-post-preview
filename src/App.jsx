@@ -7,15 +7,13 @@ import "./index.css";
 function App() {
   const [selectedPost, setSelectedPost] = useState(null);
   const [showModal, setShowModal] = useState(false);
-  const [postIdFromURL, setPostIdFromURL] = useState(null);
 
   useEffect(() => {
-    // Get post ID from URL path instead of query params
+    // Check if URL has /post/id format
     const path = window.location.pathname;
     const match = path.match(/\/post\/(\d+)/);
     if (match) {
       const id = match[1];
-      setPostIdFromURL(id);
       const post = getPostById(id);
       if (post) {
         setSelectedPost(post);

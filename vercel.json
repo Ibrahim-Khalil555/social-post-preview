@@ -1,21 +1,22 @@
 {
   "version": 2,
-  "functions": {
-    "api/post/[id].js": {
-      "runtime": "edge"
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
     },
-    "api/og/[id].js": {
-      "runtime": "edge"
+    {
+      "src": "api/post/[id].js",
+      "use": "@vercel/node"
     }
-  },
+  ],
   "routes": [
     {
       "src": "/post/(.*)",
       "dest": "/api/post/$1"
-    },
-    {
-      "src": "/og-image/(.*)",
-      "dest": "/api/og/$1"
     },
     {
       "src": "/(.*)",
@@ -23,15 +24,6 @@
     }
   ],
   "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=31536000, immutable"
-        }
-      ]
-    },
     {
       "source": "/post/(.*)",
       "headers": [
