@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "functions": {
+    "api/post/[id].js": {
+      "runtime": "edge"
+    }
+  },
+  "routes": [
+    {
+      "src": "/post/(.*)",
+      "dest": "/api/post/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ]
+}
