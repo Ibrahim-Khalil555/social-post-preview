@@ -3,6 +3,9 @@
   "functions": {
     "api/post/[id].js": {
       "runtime": "edge"
+    },
+    "api/og/[id].js": {
+      "runtime": "edge"
     }
   },
   "routes": [
@@ -11,8 +14,32 @@
       "dest": "/api/post/$1"
     },
     {
+      "src": "/og-image/(.*)",
+      "dest": "/api/og/$1"
+    },
+    {
       "src": "/(.*)",
       "dest": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/post/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
     }
   ]
 }
